@@ -1,0 +1,444 @@
+---
+title: "replicate-corpus"
+author: "Bolun Zhang"
+date: "2022-08-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(reticulate)
+use_condaenv('base')
+```
+
+## Notes for replication
+
+This file documents different stemming we tried during the replication process. For the purpose of replicating our results, only the last section matters here. You would need a python 2 virtual environment so that you can use related packages. 
+
+## The purpose of this file.
+
+This file is to link our R code to python code for stemming purpose. 
+
+```{r setting the working environment}
+library(quanteda)
+library(readtext)
+library(tidyverse)
+library(textclean)
+```
+
+## Preprocessing the file
+
+testing whether the old code for weighting works here. 
+
+```{r preprocessing}
+translation_dic <- read.csv("./Fligstein_et_al_2017_Replication_Package/Data/translation.csv")
+names(translation_dic) <- c("stemmed", "origin")
+
+# remove the space in the origin
+translation_dic$origin <- str_squish(translation_dic$origin)
+
+# first, compare the quanteda stemmer and TM stemmer, with the authors' one 
+translation_dic$current <- SnowballC::wordStem(translation_dic$origin)
+stem_difference <- translation_dic %>%
+  filter(stemmed != current)
+
+# find 461 difference. Now, considering writing a dictionary to replace the term
+# hummanly.
+
+test_data <- readtext("./Fligstein_et_al_2017_Replication_Package/RawText/*.txt")
+
+# remove part before "Transcript of the Federal Open Market Committee Meeting on"
+for (i in 1:nrow(test_data)) {
+  test_data$text[i] <- unlist(strsplit(test_data$text[i], split='Transcript of', fixed=TRUE))[2]
+}
+
+# remove \n and \f and extra space
+test_data$text <- test_data$text %>%
+  str_replace_all(., "\n", " ") %>%
+  str_replace_all(., "\f", " ") %>%
+  str_replace_all(., "\\s+", " ")
+
+# remove the header
+# remove the header by monthes
+remove_fed <- rep("Federal Open Market Committee Meeting of ", 12)
+remove_fed_2 <- rep("Federal Open Market Committee Meeting on ", 12)
+
+month_name <- c("January", "February", "March", "April", "May", "June", "July",
+                "August", "September", "October", "November", "December")
+
+remove_fed <- paste0(remove_fed, month_name)
+remove_fed_2 <- paste0(remove_fed_2, month_name)
+
+for (word in remove_fed) {
+  test_data$text <- str_remove_all(test_data$text, word)
+}
+
+for (word in remove_fed_2) {
+  test_data$text <- str_remove_all(test_data$text, word)
+}
+
+# remove feb afternoon session
+test_data$text <- test_data$text %>%
+  str_remove_all(., "February 1, 2000—Afternoon Session")
+
+# remove month and date, and related page numbers.
+for (month in month_name) {
+  test_data$text <- str_remove_all(test_data$text, regex(paste0(month," \\d+, \\d+ of \\d+")))
+}
+
+# remove page number and other
+test_data$text <- str_remove_all(test_data$text, regex("Page \\d+ of \\d+", ignore_case = TRUE))  #remove the page number format 1
+test_data$text <- str_remove_all(test_data$text, regex("\\d+ of \\d+", ignore_case = FALSE))  #remove the page number format 2
+test_data$text <- str_remove_all(test_data$text, "__truncarted__")  #remove some tokens
+
+
+test_data$text <- test_data$text %>%
+  str_replace_all(., "\n", " ") %>%
+  str_replace_all(., "\f", " ") %>%
+  str_replace_all(., "[[:digit:]]", " ") %>%
+  str_remove(., "END OF MEETING") %>%
+  str_remove(., "[Coffee break]") %>%
+  str_remove(., regex("\\[\\[a-zA-Z]+\\]"))
+
+test_data$text <- test_data$text %>%
+  str_replace_all(., "communiqu", "communique") %>%
+  str_replace_all(., "d�j", "deja") %>% # note we are using a different encoder
+  str_replace_all(., "dalla", "dallas")
+
+test_data$text <- test_data$text %>%
+  str_replace_all(., "\n", " ") %>%
+  str_replace_all(., "[[:punct:]]", " ") %>%
+  replace_non_ascii(., remove.nonconverted = FALSE) %>%
+  str_replace_all(., "[[:digit:]]", " ") %>%
+  str_replace_all(., "[[:punct:]]", " ") %>%
+  str_replace_all(., "\\s+", " ")
+
+# test_data$text[1] ## seems to work for now. 
+
+corpus <- test_data
+
+## change all the mis-spelling
+sum(
+  str_count(corpus$text, "CHAIRMAN ") +
+    str_count(corpus$text, " MR ") + 
+    str_count(corpus$text, " MS ")
+) # 18693 speeches in total
+
+temp <- corpus$text %>%  
+  str_replace_all(., "CHAIRMAN",",CHAIRMAN")%>%
+  str_replace_all(., "VICE ,CHAIRMAN",",VICE CHAIRMAN") %>%
+  str_replace_all(., "ARMS", "ARMs") %>%
+  str_replace_all(., " MR ", " ,MR ") %>%
+  str_replace_all(., " MS ", " ,MS ") # this has been further modified
+# because we find MSA and MSCI were also extracted.
+```
+
+## Test whether we replicate the processed data
+
+Test whether we can replicate the processed data so that we are minimizing the difference between our code and the author's.
+
+```{r further remove some features}
+
+# names to remove
+names <-  c("Barron","Bernanke","Bies","Boehne","Broaddus","Bullard", 
+            "Cumming","Duke","Evans", "Ferguson","Fisher","Geithner",
+            "Gramlich","Greenspan", "Guynn", "Hoenig","Holcomb", 
+            "Jordan","Kelley","Kohn","Kroszner", "Lacker",
+            "Lockhart","Lyon","McDonough", "McTeer","Meyer",
+            "Minehan","Mishkin", "Moore", "Moskow","Olson", 
+            "Parry", "Pianalto","Plosser", "Poole", "Rosengren", 
+            "Santomero", "Sapenaro","Stern", "Stewart", "Stone", 
+            "Warsh", "Yellen","Aaronson","Ahmed", "Alvarez", 
+            "Angulo","Bassett","Brayton", "Clouse","Covitz",
+            "Croushore","Danker","Doyle", "Dudley","Elmendorf",
+            "Elsasser","English", "Fox", "Fuhrer","Gagnon",
+            "Gallin", "Gibson","Gillum","Goldberg","Goodfriend",
+            "Greenlee","Hilton","Hirtle", "Johnson", "Kamin", 
+            "Kole","Kos", "Krieger", "Lang","Leahy","Lebow", 
+            "Lehnert", "Liang", "Lindsey", "Madigan", "Mattingly", 
+            "Morin","Mosser","Oliner","Parkinson","Peach", 
+            "Perelmuter","Peters","Prell", "Reifschneider", "Reinhart",
+            "Roberts", "Rolnick", "Rudebusch","Sack","Sheets", 
+            "Sichel","Simpson", "Slifman", "Smith", "Steindel",
+            "Stockton","Struckmeyer","Tetlow","Wascher", "Whitesell","Wilcox","Williams",
+            "alan","andersen","andrea","andrew","bernard",
+            "carol","chris","christin","clark","debby",
+            "dan","david","deborah","dick","donald",
+            "edward","eisenbeis","glenn","greg","helen",
+            "janet","jeff","jettison","jim","joe",
+            "john","jones","josh","karen","ken",
+            "larick","levi","linda","lopez","marvin",
+            "micharl","michell","mike","peter","steve","vincent")
+
+names_low <- tolower(names)
+```
+
+separate for the purpose of code review.
+
+```{r}
+
+# this is a modified one, can not be used in other 
+cleantext <- function(text){
+  # to remove all the front matter, we need to remove
+  # text <- str_remove_all(text, "(.*?)Transcript of Federal Open Market Committee Meeting")
+  
+  text <- str_remove_all(text, "MR [A-Z]++.")
+  text <- str_remove_all(text, "MS [A-Z]++.")
+  text <- str_remove_all(text, "CHAIRMAN [A-Z]++.")
+  text <- str_remove_all(text, "VICE CHAIRMAN [A-Z]++.") #remove speakers
+  text <- str_replace_all(text, "Dessert break", " ") #remove dessert break.
+  text <- str_remove_all(text, "[\\$,]")  #manually remove dollar sign
+  text <- str_remove_all(text, regex("(?:SEVERAL\\.)", ignore_case = FALSE)) #remove the identification of the speakers.
+  text <- str_remove_all(text, "__truncarted__")  #remove some tokens
+  #lowering case and also remove extra spaces.
+  text <- str_to_lower(text)
+  
+  # adding part after checking the tokens
+  # (these code are not necessary now, but I keep it just in case)
+  text <- str_remove_all(text, "\\+")
+  text <- str_remove_all(text, "\\=")
+  text <- str_remove_all(text, "\\¥")
+  text <- str_remove_all(text, "\\€")
+  text <- str_remove_all(text, "\\½")
+  text <- str_remove_all(text, "\\⅓")
+  text <- str_remove_all(text, "\\¼")
+  text <- str_remove_all(text, "\\⅔")
+  text <- str_remove_all(text, "\\¾")
+  text <- str_remove_all(text, "\\⅜")
+  text <- str_remove_all(text, "\\¹")
+  text <- str_remove_all(text, "\\²")
+  text <- str_remove_all(text, "\\³")
+  text <- str_remove_all(text, "\\ρ")
+  text <- str_remove_all(text, "\\φ")
+  
+  text <- str_replace_all(text, "à", "a")
+  text <- str_replace_all(text, "communiqué", "communique")
+  text <- str_replace_all(text, "déjà","deja")
+  text <- str_replace_all(text, "naïve","naive")
+  
+  text <- str_squish(text)  #remove extra spaces
+  #replacing several phrases with abbr see the footnotes of table1
+  text <- str_replace_all(text, "federal reserve board", "frb")
+  text <- str_replace_all(text, "adjustable rate mortgages", "arms")
+  text <- str_replace_all(text, "primary dealer credit facility", "pdcf")
+  text <- str_replace_all(text, "term security lending facility", "tslf")
+  text <- str_replace_all(text, "depository institutions", "dis")
+  text <- str_replace_all(text, "credit facility", "cf")
+  text <- str_replace_all(text, "office of housing enterprise oversight", "ofheo")
+  text <- str_replace_all(text, "repos", "rps")
+  text <- str_replace_all(text, "consumer price index", "cpi")
+  text <- str_replace_all(text, "gross domestic product", "gdp")
+  text <- str_replace_all(text, "loan to value ratio", "ltv")
+  text <- str_replace_all(text, "government sponsored enterprises", "gse")
+  text <- str_replace_all(text, "asset credit facility", "acf")
+  text <- str_replace_all(text, "collateralized equity obligation", "ceo")
+  text <- str_replace_all(text, "nonaccelerating inflation rate of unemployment", "nairu") # since the punct has been removed already
+}
+
+test_data$text <- cleantext(test_data$text)
+
+for(name in names_low){
+  test_data$text <- test_data$text %>%
+    str_remove_all(.,name)
+}
+
+```
+
+```{r get the replication corpus}
+author_processed <- readtext("./Fligstein_et_al_2017_Replication_Package/ProcessedTranscripts/*.txt")
+
+vocab_replication <- read_csv("./other_data/vocab_origin.csv",
+                              col_names = FALSE)
+names(vocab_replication) <- c("vocab")
+
+## some modification
+vocab_replication$vocab <- vocab_replication$vocab %>%
+  str_replace_all(., "communiquÔøΩ", "communique") %>%
+  str_replace_all(., "dÔøΩj", "deja") %>% # we do not need to correct dellas
+  str_replace_all(., "TRUE", "true") # did not know why there is adj that is capitalized. 
+
+author_processed$text <- author_processed$text %>%
+  str_replace_all(., "communiqu", "communique") %>%
+  str_replace_all(., "d�j", "deja") %>% # note we are using a different encoder
+  str_replace_all(., "dalla", "dallas")
+```
+
+using the same stemming package as the author did.
+
+```{python stemming the text}
+
+# setting the working environment
+
+from stemming.porter2 import stem
+from nltk.tokenize import word_tokenize
+import pandas as pd
+import numpy as np
+import nltk
+nltk.download('punkt')
+
+# load the r object to a python one
+prestem = r.test_data
+textdata = prestem['text']
+
+# tokenization
+tokenized_corpus = [word_tokenize(i) for i in textdata]
+# print(tokenized_corpus[0])
+
+# for word in tokenized_corpus[0]:
+#   print(word)
+#   print(stem(word))
+
+# stemming
+stemmed = []
+for text in tokenized_corpus:
+  words = [stem(word) for word in text]
+  stemmed.append(words)
+  
+  # print stemmed[0]
+  
+  # linkded to a text
+stemmed_text = []
+
+for text in stemmed:
+  fulltext = ' '.join(text)
+  stemmed_text.append(fulltext)
+    
+with open('debug_files/test.txt', 'w') as f:
+  f.write(stemmed_text[0])
+  f.close
+      
+```
+      
+## creating the pre-weighted long data format. 
+      
+creating a long df, so that we can weighting the utterance to replicate the measurement.
+      
+```{r creating a long df}
+df <- read.table(text = temp, sep = ",", fill = TRUE, col.names = paste0("V",seq_len(535)),as.is = TRUE) 
+#73rd document contains the most lines as 535 # need to double check
+df$id <- c(1:nrow(df)) # this line always break
+
+df_long <- gather(df, column, transcript, "V1":"V535", factor_key=TRUE)
+df_long$column <- NULL
+df_long$speaker <- df_long$transcript %>%
+str_extract(., "(?<=CHAIRMAN\\s)[A-Z]+| (?<=MR\\s)[A-Z]+| (?<=MS\\s)[A-Z]+|(?<=CHAIRMAN)[A-Z]+|(?<=MR)[A-Z]+|MS[A-Z]+") 
+# this need modification
+df_long <- df_long[is.na(df_long$speaker)==F,]
+
+# some modifications on the long df
+df_long$speaker <- df_long$speaker %>%  str_remove_all(.,"\\s") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"GREENPAN", "GREENSPAN") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"GREESPAN", "GREENSPAN") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"GRENSPAN", "GREENSPAN") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"KOSI", "KOS") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"KELLY", "KELLEY") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"GEITHER","GEITHNER") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"MADIGANI", "MADIGAN") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"ENGLISHI", "ENGLISH") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"POOLEI","POOLE") 
+df_long$speaker <- df_long$speaker %>%  str_replace(.,"MOSCOW", "MOSKOW") 
+
+df_long$speaker[df_long$speaker=="OHN"] <- "KOHN" 
+df_long$speaker[df_long$speaker=="TOCKTON"] <-  "STOCKTON"
+df_long$speaker[df_long$speaker=="ILCOX"] <-  "WILCOX"
+df_long$speaker[df_long$speaker=="ETLOW"] <- "TETLOW"
+df_long$speaker[df_long$speaker=="RAMLICH"] <- "GRAMLLICH"
+
+# double check the speakers
+speaker <- df_long %>% count(speaker) # double check
+
+```
+
+We need to further cleaning the data for later use. 
+
+```{r further cleaning}
+df_long$transcript <- cleantext(df_long$transcript)
+
+df_long$nword <- str_count(df_long$transcript,"\\s")+1 # count words for each speech to replicate the authors
+
+for(name in names_low){
+  df_long$transcript <- df_long$transcript %>%
+    str_remove_all(.,name)
+}
+
+## additional cleaning based on authors
+comb_voc <- list(c("cdo","cdos"),c("clo","clos"),c("cfo","cfos"),c("congress","congression"),c("cycl","cyclic"),
+                 c("day","day="),c("didn","didn=t"),c("don","don=t"),c("iraq","iraqi"),c("lbo","lbos"))
+
+for (i in comb_voc) {
+  to_replace <- i
+  remove <- to_replace[2]
+  replacement <- to_replace[1] 
+  df_long$transcript <- df_long$transcript %>%
+    str_replace_all(., remove, replacement)
+}
+```
+
+Here we can use the python code above to have the long transcript stemmed. 
+
+```{python stem the df long}
+
+# get the df long object
+p_df_long = r.df_long
+long_transcript = p_df_long["transcript"]
+
+# tokenized 
+tokenized_corpus_long = [word_tokenize(i) for i in long_transcript]
+
+# stemming using the stemmer that the authors used
+long_stemmed = []
+for text in tokenized_corpus_long:
+  words = [stem(word) for word in text]
+  long_stemmed.append(words)
+  
+# linked to a utterance
+long_stemmed_final = []
+for text in long_stemmed:
+  full_utterance = ' '.join(text)
+  long_stemmed_final.append(full_utterance)
+
+```
+
+In this code chunk, we transfer the python project to r and save it as a object for the future use. 
+    
+```{r transfer the object}
+
+# save the long stemmed. 
+stemmed_utterance = py$long_stemmed_final
+df_long$transcript <- stemmed_utterance
+    
+# save the object
+saveRDS(df_long, "./process_files/stemmed_df_long.RDS")
+
+```
+
+## stemming the original top 30s
+
+Reading in the data
+
+```{r}
+fligstein_top <- read_csv("./other_data/origin_top30.csv",
+                          col_names=FALSE)
+
+
+```
+
+Using the python stemming package
+
+```{python}
+top = r.fligstein_top
+print(top[,0])
+top = top.applymap(stem)
+```
+
+Saving the files for later reading
+
+```{r}
+# transfer the file
+fligstein_top <- py$top
+
+# save a R object
+saveRDS(fligstein_top, "./process_files/fligstein_top_stemmed.RDS")
+
+```
